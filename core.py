@@ -1,29 +1,28 @@
 from models import TaskSet, Job
-
-# # constant-step simulator
-# def simulate(taskset: TaskSet, m, scheduler, t_max: int):
-#     current_task=1  
-#     queue: list[Job] = []
-#     for t in range(t_max + 1):
-#         # Release new jobs
-#         queue+=taskset.release_jobs(t)
-#         # Check for deadlines
-#         for job in queue:
-#             if job.deadline_missed(t):
-#                 #print(f"Deadline missed for {job} at time {t} !")
-#                 return 2 # The task set is not schedulable and you had to simulate the execution.
-#         elected_job = scheduler(queue)
-#         if elected_job is not None:
-#             elected_job.schedule(1)
-#             if elected_job.is_complete():
-#                 #print("complete ;",elected_job)
-#                 queue.remove(elected_job)
-#     return 0    # The task set is schedulable and you had to simulate the 
+import math 
+# constant-step simulator
+def simulate_local(taskset: TaskSet, m, scheduler, t_max: int):
+    current_task=1  
+    queue: list[Job] = []
+    for t in range(t_max + 1):
+        # Release new jobs
+        queue+=taskset.release_jobs(t)
+        # Check for deadlines
+        for job in queue:
+            if job.deadline_missed(t):
+                #print(f"Deadline missed for {job} at time {t} !")
+                return 2 # The task set is not schedulable and you had to simulate the execution.
+        elected_job = scheduler(queue)
+        if elected_job is not None:
+            elected_job.schedule(1)
+            if elected_job.is_complete():
+                #print("complete ;",elected_job)
+                queue.remove(elected_job)
+    return 0    # The task set is schedulable and you had to simulate the 
 
 def global_edf_scheduler(queue: list[Job], m: int) -> list[Job]:
     """
     Sélectionne les m jobs avec les deadlines les plus proches pour m processeurs.
-    
     Args:
     - queue: Liste des jobs disponibles
     - m: Nombre de processeurs
@@ -42,7 +41,26 @@ def global_edf_scheduler(queue: list[Job], m: int) -> list[Job]:
     
     return elected_jobs
 
-def simulate(taskset: TaskSet, m: int, scheduler, t_max: int):
+def edf_k_scheduler(tasks: List[Task], m: int, k:int) -> TaskSet:
+    """
+    Assigner aux k-1 taches aveSc le plus d'utilisation la priorité maximale.
+    
+    Args:
+    - tasks: Objet contenant une liste des taches
+    - m: Nombre de processeurs
+    - k : the number of tasks to give the priority to
+    Returns:
+    List of tasks with updated with priorities
+    """
+    
+    if not tasks:
+        return []
+    # Trier par ordre décroissant les tâches selon leur utilisation
+    tasks.sort(key=lambda task: task.utilisation, reverse=True)
+    # Donner la priorité maximale aux jobs des k-1 premières tâches
+    for task in tasks[:k-1]: task.deadline = -math.inf
+    
+def simulate_global(taskset: TaskSet, m: int, scheduler, t_max: int):
     """
     Simulation d'un ordonnancement global EDF sur m processeurs
     
@@ -57,7 +75,10 @@ def simulate(taskset: TaskSet, m: int, scheduler, t_max: int):
     """
     queue: list[Job] = []
     processor_load: list[Job] = [None] * m  # États des m processeurs
-    
+    # the scheduler gives k as a parameter for edf-k
+    # edf(k=1) is a particular case -> do global scheduling 
+    if isinstance(scheduler, int) and k!=1 : 
+        edf_k_scheduler(taskset.tasks, m, k)        
     for t in range(t_max + 1):
         # Libérer les nouveaux jobs
         queue += taskset.release_jobs(t)
@@ -74,7 +95,7 @@ def simulate(taskset: TaskSet, m: int, scheduler, t_max: int):
                 processor_load[i] = None
         
         # Sélectionner les jobs pour les processeurs disponibles
-        elected_jobs = global_edf_scheduler(queue, m) # les jobs à exc
+        elected_jobs = global_edf_scheduler(queue, m)
         
         # Assigner les jobs aux processeurs
         # Un core traite un job à la fois à chq instant t 

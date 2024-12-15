@@ -83,9 +83,12 @@ def schedule(tasks, nb_cores, scheduler, heuristic, sort):
 		exit = schedule_partitioned_edf(tasks,nb_cores,heuristic,sort)
 	elif(scheduler=="global"):
 		schedule_global_edf(tasks, nb_cores, heuristic, sort, 0)
-	# else: 
-    #     print("al")
-
+	else: 
+        k=scheduler
+        if k>len(tasks) : 
+            return CANNOT_TELL
+        else : 
+            simulate(tasks, m, k, t_max)
 
 
 def parse_task_file(file_path: str) -> List[Task]:
