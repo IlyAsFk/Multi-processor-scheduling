@@ -5,7 +5,7 @@ from models.taskset import TaskSet
 from models.task import Task
 import csv
 from typing import List
-from core import simulate
+from core import simulate_local, simulate_global
 
 # GLOBAL CONSTANTS
 SCHEDULABLE_WITH_SIMULATION = 0
@@ -15,83 +15,64 @@ NOT_SCHEDULABLE_WITHOUT_SIMULATION = 3 # necessary condition failure
 CANNOT_TELL = 4 
 
 
-def schedule_partitioned_edf(tasks, nb_cores, heuristic, sort):
+def schedule_partitioned_edf(taskset, nb_cores, heuristic, sort):
+    tasks = taskset.tasks
+    # A sporadic implicit-deadline taskset 𝜏 is schedulable using ffdu
+    if heuristic == "ff" and sort == "du":
+        # TH 78. check sufficient condition using EDF as local scheduler
+        if has_implicit_deadlines(tasks) and partitioned_edf_shorcut(tasks, nb_cores): 
+            return True
+    feasibility_interval=0
     # partition tasks between different cores 
     partitioned, partitionable = partition(tasks, sort, heuristic, nb_cores)
-
-    cores = []
-
+    cores = [] # Liste de liste de tâches
     for core in partitioned:  # partitioned contient pr chq core, une liste de taches
         # Au d'avoir slt le nb de tâche, on récupère l'objet entier
         processor = [task for task_number in core for task in tasks if task.get_task_number() == task_number]
-        cores.append(processor)
-
+        cores.append(TaskSet(processor)) # Create a sub-taskset for each core
     partitioned = cores
-
+    
     if partitionable:
         for core in partitioned:
-
-            # determine if sks are synchronous
-            synchronous = if_synchronous(core)
-
-            has_implicit_deadlines = has_implicit_deadlines(core)
-            
-            # A sporadic implicit-deadline taskset 𝜏 is schedulable using ffdu
-            # --> Faut check qu'on est en synchrone ?
-            if (scheduler == 'partitioned' and has_implicit_deadlines and heuristic == "ff" and sort == "du"):
-                if is_schedulable_partitioned_edf(tasks, nb_cores):  # check sufficient condition
-                    algo = "edf_priority"
-                    return True
-            elif (scheduler == 'global' and has_implicit_deadlines and synchronous):
-                # necessary & sufficient condition
-                # Si th 90 ok alors exit schedulable (c du periodic) sinon (pt ê on a du periodic ou sporadic) test th 91 (peut traiter les 2)
-                # Si th 91 ok exit schedulable (c du sporadic) sinon simul
-                # Compute U_max and system utilization
-                u_max = compute_u_max(tasks)
-                system_utilization = compute_system_utilization(tasks)
-                if (is_schedulable_periodic_global_edf(nb_cores, u_max, system_utilization)
-                        or is_schedulable_sporadic_global_edf(nb_cores, u_max, system_utilization)):
-                    return SCHEDULABLE_WITHHOUT_SIMULATION
-            else:  # edf(k)
-                # Check if there are at least k tasks
-                if len(core) < scheduler:
-                    print("The task set must have at least k tasks.")
-                    return CANNOT_TELL
-                if has_implicit_deadlines and edf_k_test_with_given_m(tasks, nb_cores, scheduler):
-                    return SCHEDULABLE_WITHHOUT_SIMULATION
-
-            # simulation 
-            # simulate(scheduler, interval, core, len(tasks))
-
+            tasks=core.tasks
+            return simulate_local(tasks,feasibility_interval)
     else:
         print("PARTITIONING FAILS" + "\n")
-        return NOT_SCHEDULABLE_WITHOUT_SIMULATION
+        return 3
 
-def schedule_global_edf(tasks, m, heuristic, sort, t_max):
-    exit = simulate(tasks, m, "global", t_max)
+def schedule(taskset, nb_cores, scheduler, heuristic, sort):
+    tasks = taskset.tasks
+    if scheduler == "partitionned":
+        exit = schedule_partitioned_edf(taskset, nb_cores, heuristic, sort)
+    elif scheduler == "global":
+        # TH.91 : sufficient condition using global EDF
+        if has_implicit_deadlines(tasks):
+            u_max = compute_u_max(tasks)
+            system_utilization = compute_system_utilization(tasks)
+            if global_edf_shorcut(nb_cores, u_max, system_utilization):
+                return SCHEDULABLE_WITHOUT_SIMULATION
+        k = 1  # run the simulation for global scheduling using edf(k=1)
+        feasibility_interval = 0
+    else:  # edf(k)
+        k = scheduler
+        if k > len(tasks):
+            print("The task set must have at least k tasks.")
+            return CANNOT_TELL
+        # TH.93 : sufficient condition using EDF^(k)
+        if has_implicit_deadlines and edf_k_shorcut(tasks, nb_cores, k):
+            return SCHEDULABLE_WITHOUT_SIMULATION
+        feasibility_interval = 0
 
+    exit = simulate_global(taskset, nb_cores, k, feasibility_interval)
     if exit == 0:
         return SCHEDULABLE_WITH_SIMULATION
     elif exit == 2:
         return SCHEDULABLE_WITHOUT_SIMULATION
+    elif exit == 3:
+        return NOT_SCHEDULABLE_WITHOUT_SIMULATION
 
 
-
-def schedule(tasks, nb_cores, scheduler, heuristic, sort):
-	tasks = taskset.tasks
-	if(scheduler == "partitionned"):
-		exit = schedule_partitioned_edf(tasks,nb_cores,heuristic,sort)
-	elif(scheduler=="global"):
-		schedule_global_edf(tasks, nb_cores, heuristic, sort, 0)
-	else: 
-        k=scheduler
-        if k>len(tasks) : 
-            return CANNOT_TELL
-        else : 
-            simulate(tasks, m, k, t_max)
-
-
-def parse_task_file(file_path: str) -> List[Task]:
+def parse_task_file(file_path: str) -> TaskSet:
     tasks = []
     with open(file_path, newline='') as csvfile:
         reader = csv.reader(csvfile)
@@ -101,21 +82,6 @@ def parse_task_file(file_path: str) -> List[Task]:
             
     taskset = TaskSet(tasks)
     return taskset 
-
-def if_synchronous(tasks):
-
-	offset = None
-
-	for task in tasks:
-
-		if offset == None:
-			offset = task.get_offset()
-
-		else:
-			if task.get_offset() != offset:
-				return False
-
-	return True
 
 def compute_u_max(tasks):
     """
@@ -141,7 +107,7 @@ def has_implicit_deadlines(tasks):
             return False
     return True
 
-def is_schedulable_partitioned_edf(tasks, m):
+def partitioned_edf_shorcut(tasks, m):
     """
     Determines if a task set is schedulable using partitioned EDF based on the theorem.
 
@@ -174,7 +140,7 @@ def is_schedulable_periodic_global_edf(m,u_max,system_utilization):
 
     return False
 
-def is_schedulable_sporadic_global_edf(m,u_max,system_utilization):
+def global_edf_shorcut(m,u_max,system_utilization):
     """
     Determines if a task set is schedulable using global EDF 
     based on the theorem for the sporadic case.
@@ -188,7 +154,7 @@ def is_schedulable_sporadic_global_edf(m,u_max,system_utilization):
         
     return False
 
-def edf_k_test_with_given_m(task_set, k, m):
+def edf_k_shorcut(tasks, m, k):
     """
     Checks if a sporadic implicit-deadline system is schedulable using EDF^(k) on m processors.
     
@@ -202,7 +168,7 @@ def edf_k_test_with_given_m(task_set, k, m):
     - is_schedulable: True if schedulable, False otherwise.
     """
     # Compute the utilizations of each task
-    task_utilizations = [C / T for C, T in task_set]
+    task_utilizations = [C / T for C, T in tasks]
     
     # Sort tasks by utilization in descending order
     task_utilizations.sort(reverse=True)
@@ -215,9 +181,7 @@ def edf_k_test_with_given_m(task_set, k, m):
     U_k_plus_1 = sum(task_utilizations[:n - k - 1])
     
     # Check the test condition from Theorem 93
-    schedulable = m == ((k - 1) + (U_k_plus_1 / (1 - U_k)))
-
-    return schedulable
+    return m == ((k - 1) + (U_k_plus_1 / (1 - U_k)))
 
 
 
