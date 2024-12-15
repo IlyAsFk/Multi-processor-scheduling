@@ -87,9 +87,11 @@ def best_worst_fit(tasks_utilisation, heuristic, nb_cores):
     return [[tasks numbers]], bool
 """
 def partition(tasks, sort, heuristic, nb_cores):
-
     # built a list with the pair [task utilisation, task number] 
-    tasks_utilisation = [ [tasks[i].get_utilisation(), tasks[i].get_task_number()] for i in range(len(tasks)) ]
+    tasks_utilisation = [ [tasks[i].utilisation, i] for i in range(len(tasks)) ]
+
+    # C'est quoi get tas number
+    # tasks_utilisation = [ [tasks[i].utilisation, tasks[i].get_task_number()] for i in range(len(tasks)) ]
 
     # sort tasks by increasing or decreasing utilisation
     if   sort == 'du': tasks_utilisation = sorted(tasks_utilisation, key=itemgetter(0), reverse=True)

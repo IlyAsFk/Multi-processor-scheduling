@@ -1,4 +1,3 @@
-
 import sys
 from partitioner import *
 from models.taskset import TaskSet
@@ -6,6 +5,7 @@ from models.task import Task
 import csv
 from typing import List
 from core import simulate_local, simulate_global
+import math
 
 # GLOBAL CONSTANTS
 SCHEDULABLE_WITH_SIMULATION = 0
@@ -16,33 +16,37 @@ CANNOT_TELL = 4
 
 
 def schedule_partitioned_edf(taskset, nb_cores, heuristic, sort):
+    print("schedule_partitioned_edf")
     tasks = taskset.tasks
     # A sporadic implicit-deadline taskset 𝜏 is schedulable using ffdu
     if heuristic == "ff" and sort == "du":
         # TH 78. check sufficient condition using EDF as local scheduler
         if has_implicit_deadlines(tasks) and partitioned_edf_shorcut(tasks, nb_cores): 
             return True
-    feasibility_interval=0
+    feasibility_interval = (0, calculate_maximal_offset(tasks) + 2*lcm_of_periods(tasks))
     # partition tasks between different cores 
     partitioned, partitionable = partition(tasks, sort, heuristic, nb_cores)
     cores = [] # Liste de liste de tâches
-    for core in partitioned:  # partitioned contient pr chq core, une liste de taches
+    print("CORE ",cores)
+    print(partitioned)
+    for core in partitioned:  # partitioned contient pour chq core, une liste de taches
         # Au d'avoir slt le nb de tâche, on récupère l'objet entier
-        processor = [task for task_number in core for task in tasks if task.get_task_number() == task_number]
+        #processor = [task for task_number in core for task in tasks if task.get_task_number() == task_number]
+        processor = [task for task_number in core for task in tasks if task.task_id == task_number]
         cores.append(TaskSet(processor)) # Create a sub-taskset for each core
     partitioned = cores
     
     if partitionable:
         for core in partitioned:
-            tasks=core.tasks
-            return simulate_local(tasks,feasibility_interval)
+            return simulate_local(core,feasibility_interval)
     else:
         print("PARTITIONING FAILS" + "\n")
         return 3
 
 def schedule(taskset, nb_cores, scheduler, heuristic, sort):
+    k=0
     tasks = taskset.tasks
-    if scheduler == "partitionned":
+    if scheduler == "partitioned":
         exit = schedule_partitioned_edf(taskset, nb_cores, heuristic, sort)
     elif scheduler == "global":
         # TH.91 : sufficient condition using global EDF
@@ -52,8 +56,11 @@ def schedule(taskset, nb_cores, scheduler, heuristic, sort):
             if global_edf_shorcut(nb_cores, u_max, system_utilization):
                 return SCHEDULABLE_WITHOUT_SIMULATION
         k = 1  # run the simulation for global scheduling using edf(k=1)
-        feasibility_interval = 0
+        feasibility_interval = (calculate_maximal_offset(tasks), calculate_maximal_offset(tasks) + 2*lcm_of_periods(tasks))
+        exit = simulate_global(taskset, nb_cores, k,scheduler, feasibility_interval)
+        print(exit)
     else:  # edf(k)
+        print(scheduler)
         k = scheduler
         if k > len(tasks):
             print("The task set must have at least k tasks.")
@@ -61,9 +68,10 @@ def schedule(taskset, nb_cores, scheduler, heuristic, sort):
         # TH.93 : sufficient condition using EDF^(k)
         if has_implicit_deadlines and edf_k_shorcut(tasks, nb_cores, k):
             return SCHEDULABLE_WITHOUT_SIMULATION
-        feasibility_interval = 0
+        feasibility_interval = (calculate_maximal_offset(tasks), calculate_maximal_offset(tasks) + 2*lcm_of_periods(tasks))
+        exit = simulate_global(taskset, nb_cores, k, scheduler,feasibility_interval)
 
-    exit = simulate_global(taskset, nb_cores, k, feasibility_interval)
+        
     if exit == 0:
         return SCHEDULABLE_WITH_SIMULATION
     elif exit == 2:
@@ -71,6 +79,19 @@ def schedule(taskset, nb_cores, scheduler, heuristic, sort):
     elif exit == 3:
         return NOT_SCHEDULABLE_WITHOUT_SIMULATION
 
+def lcm(a: int, b: int) -> int:
+    return abs(a * b) // math.gcd(a, b)
+
+def lcm_of_periods(tasks: List[Task]) -> int:
+    result = tasks[0].period
+    for task in tasks[1:]:
+        result = lcm(result, task.period)
+    return result
+
+def calculate_maximal_offset(tasks: list[Task]) -> int:
+    # Extract all offsets from the taskset
+    offsets = [task.offset for task in tasks]
+    return max(offsets) 
 
 def parse_task_file(file_path: str) -> TaskSet:
     tasks = []
@@ -102,8 +123,8 @@ def has_implicit_deadlines(tasks):
     Returns:
         bool: True if all tasks have D == T, False otherwise.
     """
-    for _, T, D in tasks:
-        if D != T:
+    for task in tasks:
+        if task.deadline != task.period:
             return False
     return True
 
@@ -137,7 +158,7 @@ def is_schedulable_periodic_global_edf(m,u_max,system_utilization):
     # Apply the schedulability conditions for the periodic case
     if u_max <= 1 and system_utilization <= m:
         return True
-
+    
     return False
 
 def global_edf_shorcut(m,u_max,system_utilization):
@@ -168,7 +189,7 @@ def edf_k_shorcut(tasks, m, k):
     - is_schedulable: True if schedulable, False otherwise.
     """
     # Compute the utilizations of each task
-    task_utilizations = [C / T for C, T in tasks]
+    task_utilizations = [task.utilisation for task in tasks]
     
     # Sort tasks by utilization in descending order
     task_utilizations.sort(reverse=True)
@@ -186,19 +207,30 @@ def edf_k_shorcut(tasks, m, k):
 
 
 if __name__ == '__main__':
-
-	name_file = sys.argv[1]
-	heuristic = 'ff'
-	sort = 'du'
-	nb_cores = int(sys.argv[2])
-
-	for i in range(2, len(sys.argv), 2):
-		if sys.argv[i] == '-v' : scheduler = sys.argv[i+1] # could be a string or reprensent the <k> value for edf_k
-		elif sys.argv[i] == '-w' : worker = sys.argv[i+1] # Check if it's a number
-		elif sys.argv[i] == '-h' : heuristic = sys.argv[i+1]
-		elif sys.argv[i] == '-s' : sort = sys.argv[i+1]
+    
+    name_file = sys.argv[1]
+    heuristic = 'ff'
+    sort = 'du'
+    nb_cores = int(sys.argv[2])
+    scheduler = None
+    for i in range(2, len(sys.argv)):
+        print(f" args : {sys.argv[i]}")
+        if sys.argv[i] == '-v' : 
+            print("-v")
+            scheduler = sys.argv[i+1] # could be a string or reprensent the <k> value for edf_k
+            try: 
+                scheduler = int(scheduler) 
+            except ValueError: 
+                # Handle the case where the conversion fails
+                pass
+        elif sys.argv[i] == '-w' : 
+            worker = sys.argv[i+1] # Check if it's a number
+	    
+        elif sys.argv[i] == '-h' : heuristic = sys.argv[i+1]
+        elif sys.argv[i] == '-s' : sort = sys.argv[i+1]
 
 	# build list of task 
-	taskset = parse_task_file(name_file)
+    taskset = parse_task_file(name_file)
 	
-	exit(schedule(taskset, nb_cores, scheduler, heuristic, sort))
+    exit=schedule(taskset, nb_cores, scheduler, heuristic, sort)
+    print("EXIT = ",exit)

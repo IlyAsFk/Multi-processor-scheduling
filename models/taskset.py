@@ -11,7 +11,9 @@ class TaskSet:
         jobs = []
         for task in self.tasks:
             if t % task.period == 0:
-                jobs.append(task.spawn_job(t))
+                job = task.spawn_job(t)
+                if  job != None :
+                    jobs.append(job)
         return jobs
     
     def read_file(name_file):

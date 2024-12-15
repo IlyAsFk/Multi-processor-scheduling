@@ -1,7 +1,7 @@
 from models.job import Job
 from models.task import Task
 from typing import List, Optional
-
+import math
 
 def edf_priority(jobs: List[Job]) -> Optional[Job]:
     if len(jobs) == 0:
@@ -46,3 +46,6 @@ def edf_k_scheduler(tasks: List[Task], m: int, k:int):
     tasks.sort(key=lambda task: task.utilisation, reverse=True)
     # Donner la priorité maximale aux jobs des k-1 premières tâches
     for task in tasks[:k-1]: task.deadline = -math.inf
+
+#def global_edf_interval():
+    
